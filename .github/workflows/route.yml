@@ -1,0 +1,87 @@
+name: route build
+on:
+  workflow_dispatch:
+    inputs:
+      repo_url:
+        description: 'URL Repository'
+        required: true
+      service_name:
+        description: 'Nama Folder Service'
+        required: true
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write 
+
+    steps:
+      - name: Create Docker
+        run: |
+          cat <<EOF > Dockerfile
+          FROM node:20-slim
+
+          # 1. Install System Dependencies
+          RUN apt-get update && apt-get install -y \
+              git python3 python3-pip python3-venv wget xvfb procps \
+              libnss3 libgbm1 fonts-liberation \
+              && wget https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb \
+              && apt-get install -y ./google-chrome-stable_current_amd64.deb \
+              && rm google-chrome-stable_current_amd64.deb \
+              && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+          WORKDIR /app
+
+          # 2. Clone & Move (Logic Deployer)
+          RUN git clone --depth=1 ${{ github.event.inputs.repo_url }} temp_repo \
+              && cp -r temp_repo/${{ github.event.inputs.service_name }}/* . \
+              && rm -rf temp_repo
+
+          # 3. Install App Dependencies (Fix Path Venv)
+          RUN if [ -f package.json ]; then \
+                  npm install --omit=dev; \
+              elif [ -f requirements.txt ]; then \
+                  python3 -m venv /app/venv && \
+                  /app/venv/bin/pip install --upgrade pip && \
+                  /app/venv/bin/pip install -r requirements.txt; \
+                  if /app/venv/bin/pip list | grep -q playwright; then \
+                    /app/venv/bin/python -m playwright install chromium; \
+                  fi; \
+              fi
+              
+          # 4. Entrypoint Script
+          RUN echo '#!/bin/bash \n\
+          rm -rf /tmp/.X* /tmp/.X11-unix \n\
+          Xvfb :99 -screen 0 1024x768x24 -ac -noreset +extension GLX +render & \n\
+          export DISPLAY=:99 \n\
+          sleep 2 \n\
+          if [ -f package.json ]; then \n\
+            exec npm start \n\
+          else \n\
+            source /app/venv/bin/activate \n\
+            exec uvicorn app:app --host 0.0.0.0 --port \${PORT:-8080} \n\
+          fi' > /entrypoint.sh && chmod +x /entrypoint.sh
+
+          ENTRYPOINT ["/entrypoint.sh"]
+          EOF
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build-Push Image
+        run: |
+          SERVICE_NAME_LC=$(echo "${{ github.event.inputs.service_name }}" | tr '[:upper:]' '[:lower:]' | tr ' ' '-')
+          IMAGE_NAME="ghcr.io/${{ github.repository_owner }}/$SERVICE_NAME_LC:latest"
+          
+          docker build -t $IMAGE_NAME .
+          docker push $IMAGE_NAME
+          
+          echo "──────────────────────────────────────────"
+          echo "Image ready: $IMAGE_NAME"
+          echo "──────────────────────────────────────────"
+          
