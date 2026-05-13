@@ -37,27 +37,31 @@ jobs:
         run: |
           ngrok config add-authtoken $NGROK_AUTH
           
-          nohup python glm.py & 
+          echo "Starting Flask Server..."
+          nohup python glm.py > flask.log 2>&1 &
           
+          echo "Starting Ngrok Tunnel..."
           nohup ngrok http 5000 > ngrok.log 2>&1 &
           
-          sleep 15
+          sleep 25
           
           URL=$(curl -s localhost:4040/api/tunnels | jq -r .tunnels[0].public_url)
           
           if [ -z "$URL" ] || [ "$URL" == "null" ]; then
-            echo "FAILED: Ngrok tunnel not found. Check ngrok.log"
+            echo "ERROR: getting tunnel!"
             cat ngrok.log
             exit 1
           fi
           
-          echo "OCR Node URL: $URL"
+          echo "OCR URL: $URL"
           
-          # 6. Lapor ke API0 (Railway)
-          curl -X POST $API0_URL \
+          echo "--- Reporting to Railway ---"
+          curl -v -X POST "$API0_URL" \
             -H "Content-Type: application/json" \
             -d "{\"url\": \"$URL\", \"secret\": \"$API0_KEY\"}"
           
-          echo "Worker is registered. Standing by for tasks..."
-          while true; do sleep 60; done
+          echo -e "\n--- Worker is active ---"
+          
+          tail -f flask.log
+
           
