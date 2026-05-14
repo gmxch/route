@@ -1,69 +1,56 @@
-from flask import Flask, request, jsonify
-import requests as std_requests
-import re, base64
+#!/bin/bash
 
-app = Flask(__name__)
+REPO=$(echo "$API_URL" | cut -d '=' -f1)
+SERVICE=$(echo "$API_URL" | cut -d '=' -f4)
 
-OLLAMA_HOST = "http://localhost:11434"
-OLLAMA_MODEL = "glm-ocr"
+echo "──────────────────────────────────────────"
+echo "DEPLOYER STARTING: $SERVICE"
+echo "──────────────────────────────────────────"
 
-@app.route('/solve', methods=['POST'])
-def solve():
-    try:
-        body = request.json
-        img_b64 = body.get("image")
-        method = body.get("method", "text")
-        instruct_manual = body.get("instruct")
-        
-        if not img_b64:
-            return jsonify({"status": "error", "message": "Missing image data"}), 400
+cd /app || exit 1
+rm -rf repo
+git clone --depth=1 "$REPO" repo || { echo "Git clone failed"; exit 1; }
+cd "repo/$SERVICE" || { echo "Folder $SERVICE not found"; exit 1; }
 
-        prompt = ""
-        
-        if instruct_manual:
-            digit_match = re.search(r'(\d+)digits', instruct_manual.lower())
-            
-            if digit_match:
-                n = digit_match.group(1)
-                # Tambahkan 'from left to right' untuk memaksa urutan horizontal
-                prompt = f"Read the {n} digits in this image from left to right. Output only the numbers without spaces, text, or newlines."
-            else:
-                prompt = instruct_manual
+rm -rf /tmp/.X* /tmp/.X11-unix
+Xvfb :99 -screen 0 1024x768x24 -ac -noreset +extension GLX +render &
+export DISPLAY=:99
 
-        if not prompt:
-            if method == "math":
-                prompt = "Read the math expression in this image. Return ONLY the numbers and operator (example: 4*8). Do not solve it."
-            elif method == "text":
-                prompt = "Read the characters in this image. Return ONLY the text found."
-            else:
-                prompt = "Describe this image."
 
-        clean_b64 = img_b64.split(",")[-1] if "," in img_b64 else img_b64
+if [ -f package.json ]; then
+    echo "Node.js detected. Installing..."
+    npm install --omit=dev --no-package-lock --no-audit --no-fund
+    
+    echo "Waiting for RAM to stabilize..."
+    sleep 5
+    
+    echo "Launching Node.js App..."
+    exec npm start
 
-        payload = {
-            "model": OLLAMA_MODEL,
-            "prompt": prompt,
-            "images": [clean_b64],
-            "stream": False
-        }
-        
-        ollama_resp = std_requests.post(f"{OLLAMA_HOST}/api/generate", json=payload, timeout=60)
-        
-        if ollama_resp.status_code != 200:
-            return jsonify({"status": "error", "message": f"Ollama Error: {ollama_resp.text}"}), 500
-            
-        ocr_text = ollama_resp.json().get('response', '').strip()
+elif [ -f pyproject.toml ] || [ -f requirements.txt ]; then
+    echo "Python detected. Setting up VENV..."
+    python3 -m venv venv
+    source venv/bin/activate
+    
+    pip install --upgrade pip
+    if [ -f requirements.txt ]; then
+        pip install -r requirements.txt
+    else
+        pip install .
+    fi
 
-        if instruct_manual and "digits" in instruct_manual.lower():
-            ocr_text = "".join(ocr_text.split())
+    if pip list | grep -q playwright; then
+        echo "Installing Playwright Browsers..."
+        python -m playwright install chromium
+    fi
 
-        return jsonify({
-            "status": "success", 
-            "data": ocr_text
-        })
+    echo "Waiting for RAM to stabilize..."
+    sleep 5
 
-    except Exception as e:
-        return jsonify({"status": "error", "message": str(e)}), 500
+    echo "Launching Python (Uvicorn)..."
+    exec uvicorn app:app --host 0.0.0.0 --port ${PORT:-7860}
 
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
+else
+    echo "Error: No project files found!"
+    exit 1
+fi
