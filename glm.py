@@ -18,7 +18,6 @@ def solve():
         if not img_b64:
             return jsonify({"status": "error", "message": "Missing image data"}), 400
 
-        # --- LOGIKA PROMPT PINTAR (SERVER SIDE) ---
         prompt = ""
         
         if instruct_manual:
@@ -26,10 +25,10 @@ def solve():
             
             if digit_match:
                 n = digit_match.group(1)
-                prompt = f"Read only the {n} digits in this image. Output only the numbers without spaces or text."
+                prompt = f"Read the {n} digits in this image from left to right. Output only the numbers without spaces, text, or newlines."
             else:
                 prompt = instruct_manual
-        
+
         if not prompt:
             if method == "math":
                 prompt = "Read the math expression in this image. Return ONLY the numbers and operator (example: 4*8). Do not solve it."
