@@ -1,0 +1,73 @@
+name: OCR 
+
+on:
+  workflow_dispatch: 
+  #schedule:
+  #  - cron: '0 */5 * * *'
+
+jobs:
+  run-ocr:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360 
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install Dependencies
+        run: |
+          pip install flask requests pyngrok
+
+      - name: Install Ollama & Models
+        run: |
+          curl -fsSL https://ollama.com/install.sh | sh
+          nohup ollama serve > ollama.log 2>&1 &
+          
+          sleep 20
+          
+          echo "Downloading GLM-OCR..."
+          ollama pull glm-ocr
+          
+          echo "Downloading Qwen2-VL..."
+          ollama pull qwen2-vl
+          
+          echo "models downloaded successfully."
+
+      - name: Start Worker
+        env:
+          NGROK_AUTH: ${{ secrets.NGROK_AUTH }}
+          API0_URL: ${{ secrets.URL0 }}
+          API0_KEY: ${{ secrets.KEY0 }}
+        run: |
+          ngrok config add-authtoken $NGROK_AUTH > /dev/null 2>&1
+          
+          echo "starting worker Tunnel..."
+          nohup python ocr.py > flask.log 2>&1 &
+          
+          echo "Opening worker Tunnel..."
+          nohup ngrok http 5000 > ngrok.log 2>&1 &
+          
+          sleep 40
+          
+          URL=$(curl -s localhost:4040/api/tunnels | jq -r .tunnels[0].public_url)
+          
+          if [ -z "$URL" ] || [ "$URL" == "null" ]; then
+            echo "failed generating worker"
+            cat ngrok.log
+            exit 1
+          fi
+          
+          echo -e "\n--- Worker url successfully generated ---"
+          
+          echo "--- Reporting to Railway ---"
+          curl -s -X POST "$API0_URL" \
+            -H "Content-Type: application/json" \
+            -d "{\"url\": \"$URL\", \"secret\": \"$API0_KEY\"}"
+          
+          echo -e "\n--- Worker url successfully activated ---"
+          
+          tail -f flask.log

@@ -2,6 +2,8 @@ name: OCR glm
 
 on:
   workflow_dispatch: 
+  #schedule:
+  #  - cron: '0 */5 * * *'
 
 jobs:
   run-ocr:
@@ -24,10 +26,84 @@ jobs:
         run: |
           curl -fsSL https://ollama.com/install.sh | sh
           nohup ollama serve > ollama.log 2>&1 &
-          sleep 10
+          sleep 15
           
           echo "Downloading GLM-OCR model..."
           ollama pull glm-ocr
+
+      - name: Create Python Script
+        run: |
+          cat << 'EOF' > glm.py
+          from flask import Flask, request, jsonify
+          import requests as std_requests
+          import re, base64
+
+          app = Flask(__name__)
+          OLLAMA_HOST = "http://localhost:11434"
+          OLLAMA_MODEL = "glm-ocr"
+
+          @app.route('/solve', methods=['POST'])
+          def solve():
+              try:
+                  body = request.json
+                  img_b64 = body.get("image")
+                  method = body.get("method", "text")
+                  inst = body.get("instruct")
+                  
+                  if not img_b64:
+                      return jsonify({"status": "error", "message": "Missing image data"}), 400
+
+                  prompt = ""
+                  if inst:
+                      digit_match = re.search(r'(\d+)digits', inst.lower())
+                      if digit_match:
+                          n = digit_match.group(1)
+                          prompt = f"Read the {n} digits from left to right. Output only the numbers without spaces or newlines."
+                      else:
+                          prompt = inst
+
+                  if not prompt:
+                      if method == "math":
+                          prompt = "Read the math expression. Return ONLY the numbers and operator (example: 4*8). No = or ?"
+                      elif method == "text":
+                          prompt = "Read the characters in this image. Return ONLY the text found."
+                      else:
+                          prompt = "Describe this image."
+
+                  clean_b64 = img_b64.split(",")[-1] if "," in img_b64 else img_b64
+
+                  payload = {
+                      "model": OLLAMA_MODEL,
+                      "prompt": prompt,
+                      "images": [clean_b64],
+                      "stream": False
+                  }
+                  
+                  resp = std_requests.post(f"{OLLAMA_HOST}/api/generate", json=payload, timeout=60)
+                  if resp.status_code != 200:
+                      return jsonify({"status": "error", "message": "Ollama Error"}), 500
+                      
+                  ocr_text = resp.json().get('response', '').strip()
+
+                  # Pembersihan Akhir
+                  if inst and "digits" in inst.lower():
+                      ocr_text = "".join(re.findall(r'\d+', ocr_text))
+                  elif method == "math":
+                      ocr_text = ocr_text.lower().replace('x','*').replace('÷','/').replace(':','/')
+                      math_match = re.search(r'(\d+[\+\-\*/%]+\d*)', ocr_text)
+                      if math_match:
+                          ocr_text = math_match.group(1).rstrip('+-*/')
+                  else:
+                      ocr_text = ocr_text.replace("\n", " ").strip()
+
+                  return jsonify({"status": "success", "data": ocr_text})
+
+              except Exception as e:
+                  return jsonify({"status": "error", "message": str(e)}), 500
+
+          if __name__ == '__main__':
+              app.run(host='0.0.0.0', port=5000)
+          EOF
 
       - name: Start Worker
         env:
@@ -35,7 +111,7 @@ jobs:
           API0_URL: ${{ secrets.URL0 }}
           API0_KEY: ${{ secrets.KEY0 }}
         run: |
-          ngrok config add-authtoken $NGROK_AUTH
+          ngrok config add-authtoken $NGROK_AUTH > /dev/null 2>&1
           
           echo "Starting Flask Server..."
           nohup python glm.py > flask.log 2>&1 &
@@ -43,25 +119,22 @@ jobs:
           echo "Starting Ngrok Tunnel..."
           nohup ngrok http 5000 > ngrok.log 2>&1 &
           
-          sleep 25
+          sleep 30
           
           URL=$(curl -s localhost:4040/api/tunnels | jq -r .tunnels[0].public_url)
           
           if [ -z "$URL" ] || [ "$URL" == "null" ]; then
             echo "ERROR: getting tunnel!"
-            cat ngrok.log
             exit 1
           fi
           
           echo "OCR URL: $URL"
           
           echo "--- Reporting to Railway ---"
-          curl -v -X POST "$API0_URL" \
+          curl -s -X POST "$API0_URL" \
             -H "Content-Type: application/json" \
             -d "{\"url\": \"$URL\", \"secret\": \"$API0_KEY\"}"
           
-          echo -e "\n--- Worker is active ---"
+          echo -e "\n--- Worker GLM is active ---"
           
           tail -f flask.log
-
-          
