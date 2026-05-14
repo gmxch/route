@@ -55,6 +55,9 @@ def solve():
 
         if instruct_manual and "digits" in instruct_manual.lower():
             ocr_text = "".join(ocr_text.split())
+            ocr_text = "".join(re.findall(r'\d+', ocr_text))
+        else:
+            ocr_text = ocr_text.replace("\n", " ").strip()
 
         return jsonify({
             "status": "success", 
@@ -66,3 +69,6 @@ def solve():
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
+
+
+
