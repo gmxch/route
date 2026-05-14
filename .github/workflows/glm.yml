@@ -36,74 +36,78 @@ jobs:
           cat << 'EOF' > glm.py
           from flask import Flask, request, jsonify
           import requests as std_requests
-          import re, base64
+          import re, base64, threading
 
           app = Flask(__name__)
           OLLAMA_HOST = "http://localhost:11434"
           OLLAMA_MODEL = "glm-ocr"
+          
+          lock = threading.Lock()
 
           @app.route('/solve', methods=['POST'])
           def solve():
-              try:
-                  body = request.json
-                  img_b64 = body.get("image")
-                  method = body.get("method", "text")
-                  inst = body.get("instruct")
-                  
-                  if not img_b64:
-                      return jsonify({"status": "error", "message": "Missing image data"}), 400
-
-                  prompt = ""
-                  if inst:
-                      digit_match = re.search(r'(\d+)digits', inst.lower())
-                      if digit_match:
-                          n = digit_match.group(1)
-                          prompt = f"Read the {n} digits from left to right. Output only the numbers without spaces or newlines."
-                      else:
-                          prompt = inst
-
-                  if not prompt:
-                      if method == "math":
-                          prompt = "Read the math expression. Return ONLY the numbers and operator (example: 4*8). No = or ?"
-                      elif method == "text":
-                          prompt = "Read the characters in this image. Return ONLY the text found."
-                      else:
-                          prompt = "Describe this image."
-
-                  clean_b64 = img_b64.split(",")[-1] if "," in img_b64 else img_b64
-
-                  payload = {
-                      "model": OLLAMA_MODEL,
-                      "prompt": prompt,
-                      "images": [clean_b64],
-                      "stream": False
-                  }
-                  
-                  resp = std_requests.post(f"{OLLAMA_HOST}/api/generate", json=payload, timeout=60)
-                  if resp.status_code != 200:
-                      return jsonify({"status": "error", "message": "Ollama Error"}), 500
+              with lock:
+                  try:
+                      body = request.json
+                      img_b64 = body.get("image")
+                      method = body.get("method", "text")
+                      inst = body.get("instruct")
                       
-                  ocr_text = resp.json().get('response', '').strip()
+                      if not img_b64:
+                          return jsonify({"status": "error", "message": "Missing image"}), 400
 
-                  # Pembersihan Akhir
-                  if inst and "digits" in inst.lower():
-                      ocr_text = "".join(re.findall(r'\d+', ocr_text))
-                  elif method == "math":
-                      ocr_text = ocr_text.lower().replace('x','*').replace('÷','/').replace(':','/')
-                      math_match = re.search(r'(\d+[\+\-\*/%]+\d*)', ocr_text)
-                      if math_match:
-                          ocr_text = math_match.group(1).rstrip('+-*/')
-                  else:
-                      ocr_text = ocr_text.replace("\n", " ").strip()
+                      prompt = ""
+                      if inst:
+                          digit_match = re.search(r'(\d+)digits', inst.lower())
+                          if digit_match:
+                              n = digit_match.group(1)
+                              prompt = f"Read the {n} digits from left to right. Output only the numbers without spaces."
+                          else:
+                              prompt = inst
 
-                  return jsonify({"status": "success", "data": ocr_text})
+                      if not prompt:
+                          if method == "math":
+                              prompt = "Read the math expression. Return ONLY the numbers and operator. No = or ?"
+                          else:
+                              prompt = "Read all characters in this image. Return ONLY the text."
 
-              except Exception as e:
-                  return jsonify({"status": "error", "message": str(e)}), 500
+                      clean_b64 = img_b64.split(",")[-1] if "," in img_b64 else img_b64
+
+                      payload = {
+                          "model": OLLAMA_MODEL,
+                          "prompt": prompt,
+                          "images": [clean_b64],
+                          "stream": False,
+                          "options": {"temperature": 0} 
+                      }
+                      
+                      resp = std_requests.post(f"{OLLAMA_HOST}/api/generate", json=payload, timeout=40)
+                      if resp.status_code != 200:
+                          return jsonify({"status": "error", "message": "Ollama Error"}), 500
+                          
+                      ocr_text = resp.json().get('response', '').strip()
+
+                      if inst and "digits" in inst.lower():
+                          ocr_text = "".join(re.findall(r'\d+', ocr_text))
+                      elif method == "math":
+                          ocr_text = ocr_text.lower().replace('x','*').replace('÷','/').replace(':','/')
+                          math_match = re.search(r'(\d+[\+\-\*/%]+\d*)', ocr_text)
+                          if math_match:
+                              ocr_text = math_match.group(1).rstrip('+-*/')
+                          else:
+                              ocr_text = re.sub(r'[^0-9\+\-\*/%]', '', ocr_text)
+                      else:
+                          ocr_text = ocr_text.replace("\n", " ").strip()
+
+                      return jsonify({"status": "success", "data": ocr_text})
+
+                  except Exception as e:
+                      return jsonify({"status": "error", "message": str(e)}), 500
 
           if __name__ == '__main__':
-              app.run(host='0.0.0.0', port=5000)
+              app.run(host='0.0.0.0', port=5000, threaded=True)
           EOF
+
 
       - name: Start Worker
         env:
