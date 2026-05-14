@@ -1,17 +1,20 @@
 import re, requests as std_requests
 from flask import Flask, request, jsonify
-from concurrent.futures import ThreadPoolExecutor
 from collections import Counter
 
 app = Flask(__name__)
 
 OLLAMA_HOST = "http://localhost:11434"
-MODELS = ["glm-ocr", "qwen2-vl"]
-
+MODELS = ["glm-ocr", "qwen2-vl:2b"]
 
 def call_ollama(model, prompt, img_b64):
     try:
-        payload = {"model": model, "prompt": prompt, "images": [img_b64], "stream": False}
+        payload = {
+            "model": model, 
+            "prompt": prompt, 
+            "images": [img_b64], 
+            "stream": False
+        }
         resp = std_requests.post(f"{OLLAMA_HOST}/api/generate", json=payload, timeout=40)
         if resp.status_code == 200:
             return resp.json().get('response', '').strip()
@@ -25,24 +28,22 @@ def solve_digits(img_b64, target_len):
         "Read all numbers and text in this image accurately."
     ]
     
-    tasks = []
+    results = []
     for m in MODELS:
         for p in prompts:
-            tasks.append((m, p))
-
-    with ThreadPoolExecutor(max_workers=4) as executor:
-        futures = [executor.submit(call_ollama, m, p, img_b64) for m, p in tasks]
-        results = [f.result() for f in futures]
+            res = call_ollama(m, p, img_b64)
+            if res:
+                results.append(res)
 
     candidates = []
     for res in results:
-        if res:
-            clean = "".join(re.findall(r'\d+', res))
-            if clean: candidates.append(clean)
+        clean = "".join(re.findall(r'\d+', res))
+        if clean:
+            candidates.append(clean)
     
-    if not candidates: return None
+    if not candidates:
+        return None
 
-    # Voting
     vote_result = Counter(candidates)
     winner, _ = vote_result.most_common(1)[0]
 
@@ -58,36 +59,31 @@ def solve_math(img_b64):
         "Read all text in this image accurately."
     ]
     
-    tasks = []
+    results = []
     for m in MODELS:
         for p in prompts:
-            tasks.append((m, p))
-
-    with ThreadPoolExecutor(max_workers=4) as executor:
-        futures = [executor.submit(call_ollama, m, p, img_b64) for m, p in tasks]
-        results = [f.result() for f in futures]
+            res = call_ollama(m, p, img_b64)
+            if res:
+                results.append(res)
 
     candidates = []
     for res in results:
-        if not res: continue
-        
         text = res.lower().replace('x', '*').replace('÷', '/').replace(':', '/')
         
         match = re.search(r'(\d+[\+\-\*/%]+\d*)', text)
         
         if match:
-            val = match.group(1)
-            val = val.rstrip('+-*/')
+            val = match.group(1).rstrip('+-*/')
             candidates.append(val)
         else:
             fallback = "".join(re.findall(r'[\d\+\-\*/%]', text))
-            if fallback: candidates.append(fallback)
+            if fallback:
+                candidates.append(fallback)
 
-    if not candidates: return None
+    if not candidates:
+        return None
 
     return Counter(candidates).most_common(1)[0][0]
-
-
 
 @app.route('/solve', methods=['POST'])
 def solve():
@@ -97,20 +93,17 @@ def solve():
         method = body.get("method", "text")
         instruct = body.get("instruct", "")
 
-        # Cek apakah ini instruksi digits
         digit_match = re.search(r'(\d+)digits', instruct.lower()) if instruct else None
         
         if digit_match:
-            # JALANKAN FUNGSI DIGITS
             target_len = int(digit_match.group(1))
             final_data = solve_digits(img_b64, target_len)
         elif method == "math":
-            # JALANKAN FUNGSI MATH
             final_data = solve_math(img_b64)
         else:
-            # JALANKAN TEXT BIASA (Single Task)
-            final_data = call_ollama("qwen2-vl", "Read all text in this image.", img_b64)
-            if final_data: final_data = final_data.replace("\n", " ").strip()
+            final_data = call_ollama("qwen2-vl:2b", "Read all text in this image.", img_b64)
+            if final_data:
+                final_data = final_data.replace("\n", " ").strip()
 
         if not final_data:
             return jsonify({"status": "error", "message": "Failed to get solution"}), 500
@@ -125,4 +118,3 @@ def solve():
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
-    

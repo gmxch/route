@@ -33,7 +33,7 @@ jobs:
           ollama pull glm-ocr
           
           echo "Downloading Qwen2-VL..."
-          ollama pull qwen2-vl
+          ollama pull qwen2-vl:2b
           
           echo "models downloaded successfully."
 
