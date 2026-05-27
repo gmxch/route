@@ -3,6 +3,7 @@ FROM node:20-slim
 RUN apt-get update && apt-get install -y \
     git python3 python3-pip python3-venv \
     wget gnupg ca-certificates xvfb procps \
+    tesseract-ocr libtesseract-dev \
     fonts-liberation libappindicator3-1 libasound2 libatk-bridge2.0-0 \
     libatk1.0-0 libxss1 libnss3 libxcomposite1 libxdamage1 libxrandr2 libgbm1 \
     libxkbcommon0 libpango-1.0-0 libcairo2 libasound2 \
