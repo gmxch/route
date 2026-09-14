@@ -20,14 +20,14 @@ echo "Setting up Chromium environment..."
 mkdir -p /tmp/chromium-home/.config
 mkdir -p /tmp/chromium-home/.cache
 
+
 export HOME=/tmp/chromium-home
 export XDG_CONFIG_HOME=/tmp/chromium-home/.config
 export XDG_CACHE_HOME=/tmp/chromium-home/.cache
-
 export CHROME_BIN=/usr/bin/google-chrome-stable
-
 export HEADLESS=false
-export DEBUG=true
+export DEBUG=${DEBUG:-false}
+
 
 echo "Starting Xvfb display :99..."
 Xvfb :99 -screen 0 1280x1024x24 +extension GLX +render >/dev/null 2>&1 &

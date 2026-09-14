@@ -8,6 +8,11 @@ RUN apt-get update && apt-get install -y \
     python3-venv \
     build-essential \
     libgl1 \
+    libglu1-mesa \
+    libdrm2 \
+    libx11-xcb1 \
+    libxcb-dri3-0 \
+    libdbus-1-3 \
     wget \
     gnupg \
     ca-certificates \
@@ -16,6 +21,7 @@ RUN apt-get update && apt-get install -y \
     tesseract-ocr \
     libtesseract-dev \
     fonts-liberation \
+    fonts-ipafont-gothic \
     libappindicator3-1 \
     libasound2 \
     libatk-bridge2.0-0 \
