@@ -1,6 +1,5 @@
 FROM python:3.11-slim
 
-
 RUN apt-get update && apt-get install -y \
     git \
     python3 \
@@ -12,6 +11,7 @@ RUN apt-get update && apt-get install -y \
     libdrm2 \
     libx11-xcb1 \
     libxcb-dri3-0 \
+    libxshmfence1 \
     libdbus-1-3 \
     wget \
     gnupg \
