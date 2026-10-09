@@ -1,6 +1,9 @@
 FROM python:3.11-slim
 
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y curl ca-certificates gnupg && \
+    curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
+    apt-get install -y \
+    nodejs \
     git \
     python3 \
     python3-pip \
@@ -14,8 +17,6 @@ RUN apt-get update && apt-get install -y \
     libxshmfence1 \
     libdbus-1-3 \
     wget \
-    gnupg \
-    ca-certificates \
     xvfb \
     procps \
     tesseract-ocr \
