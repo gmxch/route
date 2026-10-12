@@ -31,7 +31,7 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq \
-            xvfb git curl wget ca-certificates openssh-client \
+            xvfb git curl wget ca-certificates \
             python3 python3-venv python3-pip \
             nodejs npm
 
@@ -65,29 +65,25 @@ jobs:
           done
           echo "app tidak listen, dump log:"; tail -n 200 /tmp/app.log || true; exit 1
 
-      - name: Start SSH Tunnel (localhost.run)
+      - name: Install cloudflared
         run: |
-          mkdir -p ~/.ssh
-          ssh-keyscan -t rsa,ecdsa,ed25519 localhost.run >> ~/.ssh/known_hosts 2>/dev/null
+          curl -L --output cloudflared.deb https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
+          sudo dpkg -i cloudflared.deb
 
-          nohup ssh -o StrictHostKeyChecking=no \
-                    -o UserKnownHostsFile=~/.ssh/known_hosts \
-                    -o ServerAliveInterval=30 \
-                    -o ServerAliveCountMax=3 \
-                    -o ExitOnForwardFailure=yes \
-                    -R 80:localhost:${{ inputs.port }} \
-                    nokey@localhost.run > /tmp/tunnel.log 2>&1 &
-          echo "ssh pid=$!"
+      - name: Start Cloudflare Tunnel
+        run: |
+          nohup cloudflared tunnel --url http://localhost:${{ inputs.port }} > /tmp/tunnel.log 2>&1 &
+          echo "cloudflared pid=$!"
 
       - name: Wait for tunnel URL
         run: |
           for i in $(seq 1 30); do
-            URL=$(grep -oE 'https://[a-z0-9-]+\.lhr\.(life|rocks)' /tmp/tunnel.log | head -1 || true)
+            URL=$(grep -oE 'https://[a-zA-Z0-9-]+\.trycloudflare\.com' /tmp/tunnel.log | head -1 || true)
             [ -n "$URL" ] && break
             sleep 2
           done
           if [ -z "$URL" ]; then
-            echo "gagal dapat URL, dump log:"; tail -n 60 /tmp/tunnel.log; exit 1
+            echo "gagal dapat URL, dump log:"; cat /tmp/tunnel.log; exit 1
           fi
           echo "URL=$URL" >> $GITHUB_ENV
           echo "::notice title=Tunnel URL::$URL"
@@ -108,7 +104,8 @@ jobs:
         run: |
           while true; do
             sleep 60
-            if ! pgrep -f "ssh.*localhost.run" >/dev/null; then
-              echo "ssh tunnel mati:"; tail -n 30 /tmp/tunnel.log
+            if ! pgrep -f "cloudflared tunnel" >/dev/null; then
+              echo "cloudflared tunnel mati:"; tail -n 30 /tmp/tunnel.log
+              exit 1
             fi
           done
