@@ -12,59 +12,62 @@ trap 'echo "Shutting down..."; pkill -P $$ 2>/dev/null || true; exit 0' SIGTERM 
 
 REPO=$(echo "$API_URL" | cut -d '=' -f1)
 SERVICE=$(echo "$API_URL" | cut -d '=' -f4)
-echo "Deploying: $SERVICE"
+echo "Target Service: $SERVICE"
 
-cd /app && rm -rf repo
-git clone --depth=1 "$REPO" repo && cd "repo/$SERVICE" || exit 1
+setup_project() {
+    echo ">>> Repulling & Setting up project..."
+    cd /app && rm -rf repo
+    git clone --depth=1 "$REPO" repo && cd "repo/$SERVICE" || exit 1
 
-if [ -f ".needs-browser" ]; then
-    echo "Setting up Chromium & Xvfb..."
-    mkdir -p /tmp/chromium-home/.config /tmp/chromium-home/.cache
-    
-    export HOME=/tmp/chromium-home
-    export XDG_CONFIG_HOME=/tmp/chromium-home/.config
-    export XDG_CACHE_HOME=/tmp/chromium-home/.cache
-    export CHROME_BIN=/usr/bin/google-chrome-stable
-    export DEBUG=true
-    export HEADLESS=false
+    if [ -f ".needs-browser" ]; then
+        if ! pgrep -x Xvfb > /dev/null; then
+            echo "Starting Xvfb..."
+            mkdir -p /tmp/chromium-home/.config /tmp/chromium-home/.cache
+            export HOME=/tmp/chromium-home
+            export XDG_CONFIG_HOME=/tmp/chromium-home/.config
+            export XDG_CACHE_HOME=/tmp/chromium-home/.cache
+            export CHROME_BIN=/usr/bin/google-chrome-stable
+            export DISPLAY=:99
+            Xvfb :99 -screen 0 1024x768x24 +extension GLX +render >/dev/null 2>&1 &
+            sleep 1
+        fi
+    fi
 
-    Xvfb :99 -screen 0 1024x768x24 +extension GLX +render >/dev/null 2>&1 &
-    export DISPLAY=:99
-    sleep 1
-else
-    echo "No browser needed. Skipping Xvfb/Chromium setup."
-fi
-
-if [ -f "package.json" ]; then
-    echo "Installing Node dependencies..."
-    if [ -f "package-lock.json" ]; then
-        npm ci --omit=dev --quiet
+    if [ -f "package.json" ]; then
+        [ -f "package-lock.json" ] && npm ci --omit=dev --quiet || npm install --omit=dev --quiet
+    elif [ -f "requirements.txt" ] || [ -f "pyproject.toml" ]; then
+        python3 -m venv /app/venv && source /app/venv/bin/activate
+        pip install --upgrade pip -q
+        [ -f "pyproject.toml" ] && pip install . -q
+        [ -f "requirements.txt" ] && pip install -r requirements.txt -q
     else
-        npm install --omit=dev --quiet
+        echo "Error: No recognizable project type found."
+        exit 1
     fi
-    echo "Starting Node.js app..."
-    exec node app.js
+}
 
-elif [ -f "pyproject.toml" ] || [ -f "requirements.txt" ]; then
-    echo "Setting up Python VENV..."
-    python3 -m venv venv && source venv/bin/activate
-    pip install --upgrade pip -q
+setup_project
+
+while true; do
+    echo ">>> Starting app..."
+    cd /app/repo/$SERVICE
     
-    if [ -f "pyproject.toml" ]; then
-        pip install . -q
-    elif [ -f "requirements.txt" ]; then
-        pip install -r requirements.txt -q
-    fi
-    
-    echo "Starting Python app..."
-    if [ -f "app.py" ] && command -v uvicorn &> /dev/null; then
-        exec uvicorn app:app --host 0.0.0.0 --port ${PORT:-7860}
+    if [ -f "package.json" ]; then
+        node app.js &
     else
-        exec python app.py
+        source /app/venv/bin/activate
+        if [ -f "app.py" ] && command -v uvicorn &> /dev/null; then
+            uvicorn app:app --host 0.0.0.0 --port ${PORT:-7860} &
+        else
+            python app.py &
+        fi
     fi
-
-else
-    echo "Error: No recognizable project type found."
-    echo "Expected: package.json, pyproject.toml, or requirements.txt"
-    exit 1
-fi
+    
+    APP_PID=$!
+    wait $APP_PID
+    EXIT_CODE=$?
+    
+    echo ">>> App exited (code $EXIT_CODE). Repulling & Restarting in 3s..."
+    sleep 3
+    setup_project
+done
