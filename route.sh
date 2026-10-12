@@ -1,5 +1,4 @@
 #!/bin/bash
-set -e
 
 echo "Cleaning up existing processes and locks..."
 pkill -9 -f "node" 2>/dev/null || true
@@ -14,10 +13,22 @@ REPO=$(echo "$API_URL" | cut -d '=' -f1)
 SERVICE=$(echo "$API_URL" | cut -d '=' -f4)
 echo "Target Service: $SERVICE"
 
-setup_project() {
-    echo ">>> Repulling & Setting up project..."
-    cd /app && rm -rf repo
-    git clone --depth=1 "$REPO" repo && cd "repo/$SERVICE" || exit 1
+sync_project() {
+    echo ">>> Syncing & Setting up project..."
+    cd /app || exit 1
+    
+    if [ -d "repo/.git" ]; then
+        echo ">>> Repository exists, fetching latest changes..."
+        cd repo
+        git fetch --all --quiet
+        git reset --hard origin/HEAD --quiet || git reset --hard origin/main --quiet || git reset --hard origin/master --quiet
+        cd "$SERVICE" || exit 1
+    else
+        echo ">>> Cloning repository for the first time..."
+        rm -rf repo
+        git clone --depth=1 "$REPO" repo || exit 1
+        cd "repo/$SERVICE" || exit 1
+    fi
 
     if [ -f ".needs-browser" ]; then
         if ! pgrep -x Xvfb > /dev/null; then
@@ -36,7 +47,10 @@ setup_project() {
     if [ -f "package.json" ]; then
         [ -f "package-lock.json" ] && npm ci --omit=dev --quiet || npm install --omit=dev --quiet
     elif [ -f "requirements.txt" ] || [ -f "pyproject.toml" ]; then
-        python3 -m venv /app/venv && source /app/venv/bin/activate
+        if [ ! -d "/app/venv" ]; then
+            python3 -m venv /app/venv
+        fi
+        source /app/venv/bin/activate
         pip install --upgrade pip -q
         [ -f "pyproject.toml" ] && pip install . -q
         [ -f "requirements.txt" ] && pip install -r requirements.txt -q
@@ -46,11 +60,11 @@ setup_project() {
     fi
 }
 
-setup_project
+sync_project
 
 while true; do
     echo ">>> Starting app..."
-    cd /app/repo/$SERVICE
+    cd /app/repo/$SERVICE || exit 1
     
     if [ -f "package.json" ]; then
         node app.js &
@@ -67,7 +81,13 @@ while true; do
     wait $APP_PID
     EXIT_CODE=$?
     
-    echo ">>> App exited (code $EXIT_CODE). Repulling & Restarting in 3s..."
-    sleep 3
-    setup_project
+    if [ $EXIT_CODE -eq 0 ]; then
+        echo ">>> App exited gracefully (code 0). Restarting in 2s..."
+        sleep 2
+        sync_project 
+    else
+        echo ">>> App CRASHED (code $EXIT_CODE). Syncing & Restarting in 5s..."
+        sleep 5
+        sync_project
+    fi
 done
