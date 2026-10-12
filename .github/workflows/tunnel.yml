@@ -6,9 +6,6 @@ on:
       folder:
         description: 'SERVICE / folder di dalam repo target'
         required: true
-      host:
-        description: 'Subdomain (mis. tes-aa → tes-aa.lhr.life)'
-        required: true
       port:
         description: 'PORT app'
         required: false
@@ -77,7 +74,7 @@ jobs:
                     -o ServerAliveInterval=30 \
                     -o ServerAliveCountMax=3 \
                     -o ExitOnForwardFailure=yes \
-                    -R "${{ inputs.host }}:80:localhost:${{ inputs.port }}" \
+                    -R 80:localhost:${{ inputs.port }} \
                     nokey@localhost.run > /tmp/tunnel.log 2>&1 &
           echo "ssh pid=$!"
 
