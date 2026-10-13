@@ -4,12 +4,8 @@ on:
   workflow_dispatch:
     inputs:
       folder:
-        description: 'SERVICE / folder di dalam repo target'
+        description: 'SERVICE'
         required: true
-      port:
-        description: 'PORT app'
-        required: false
-        default: '7860'
 
 jobs:
   run:
@@ -26,6 +22,9 @@ jobs:
           repository: gmxch/solver
           token: ${{ secrets.TARGET_REPO_TOKEN }}
           path: target
+
+      - name: Generate random port
+        run: echo "PORT=$((10000 + RANDOM % 55000))" >> $GITHUB_ENV
 
       - name: Install system deps
         run: |
@@ -48,7 +47,7 @@ jobs:
 
       - name: Setup app
         env:
-          PORT: ${{ inputs.port }}
+          PORT: ${{ env.PORT }}
         working-directory: target/${{ inputs.folder }}
         run: |
           chmod +x "$GITHUB_WORKSPACE/runner.sh"
@@ -57,10 +56,9 @@ jobs:
 
       - name: Wait for port
         run: |
-          PORT="${{ inputs.port }}"
           for i in $(seq 1 90); do
-            curl -fsS "http://127.0.0.1:${PORT}" >/dev/null 2>&1 && {
-              echo "port ${PORT} up (${i}x2s)"; exit 0; }
+            curl -fsS "http://127.0.0.1:${{ env.PORT }}" >/dev/null 2>&1 && {
+              echo "port ${{ env.PORT }} up (${i}x2s)"; exit 0; }
             sleep 2
           done
           echo "app tidak listen, dump log:"; tail -n 200 /tmp/app.log || true; exit 1
@@ -72,7 +70,7 @@ jobs:
 
       - name: Start Cloudflare Tunnel
         run: |
-          nohup cloudflared tunnel --url http://localhost:${{ inputs.port }} > /tmp/tunnel.log 2>&1 &
+          nohup cloudflared tunnel --url http://localhost:${{ env.PORT }} > /tmp/tunnel.log 2>&1 &
           echo "cloudflared pid=$!"
 
       - name: Wait for tunnel URL
@@ -97,7 +95,7 @@ jobs:
             echo "|---|---|"
             echo "| **URL** | [$URL]($URL) |"
             echo "| **Folder** | \`${{ inputs.folder }}\` |"
-            echo "| **Port** | \`${{ inputs.port }}\` |"
+            echo "| **Port** | \`${{ env.PORT }}\` |"
           } >> $GITHUB_STEP_SUMMARY
 
       - name: Keep alive
