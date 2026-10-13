@@ -32,18 +32,7 @@ jobs:
           sudo apt-get install -y -qq \
             xvfb git curl wget ca-certificates \
             python3 python3-venv python3-pip \
-            nodejs npm
-
-      - name: Install Chromium
-        run: |
-          sudo apt-get install -y -qq chromium-browser || \
-          sudo apt-get install -y -qq chromium || true
-          FOUND=""
-          for c in /usr/bin/chromium-browser /usr/bin/chromium /usr/bin/google-chrome; do
-            [ -x "$c" ] && FOUND="$c" && break
-          done
-          [ -n "$FOUND" ] && sudo ln -sf "$FOUND" /usr/bin/google-chrome-stable
-          /usr/bin/google-chrome-stable --version || true
+            nodejs npm chromium
 
       - name: Setup app
         env:
@@ -57,8 +46,7 @@ jobs:
       - name: Wait for port
         run: |
           for i in $(seq 1 90); do
-            curl -fsS "http://127.0.0.1:${{ env.PORT }}" >/dev/null 2>&1 && {
-              echo "port ${{ env.PORT }} up (${i}x2s)"; exit 0; }
+            curl -fsS "http://127.0.0.1:${{ env.PORT }}" >/dev/null 2>&1 && { echo "port up"; exit 0; }
             sleep 2
           done
           echo "app tidak listen, dump log:"; tail -n 200 /tmp/app.log || true; exit 1
@@ -71,7 +59,6 @@ jobs:
       - name: Start Cloudflare Tunnel
         run: |
           nohup cloudflared tunnel --url http://localhost:${{ env.PORT }} > /tmp/tunnel.log 2>&1 &
-          echo "cloudflared pid=$!"
 
       - name: Wait for tunnel URL
         run: |
@@ -88,15 +75,12 @@ jobs:
 
       - name: Summary
         run: |
-          {
-            echo "## Solver Running"
-            echo ""
-            echo "| | |"
-            echo "|---|---|"
-            echo "| **URL** | [$URL]($URL) |"
-            echo "| **Folder** | \`${{ inputs.folder }}\` |"
-            echo "| **Port** | \`${{ env.PORT }}\` |"
-          } >> $GITHUB_STEP_SUMMARY
+          echo "## Solver Running" >> $GITHUB_STEP_SUMMARY
+          echo "| | |" >> $GITHUB_STEP_SUMMARY
+          echo "|---|---|" >> $GITHUB_STEP_SUMMARY
+          echo "| **URL** | [$URL]($URL) |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Folder** | \`${{ inputs.folder }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Port** | \`${{ env.PORT }}\` |" >> $GITHUB_STEP_SUMMARY
 
       - name: Keep alive
         run: |

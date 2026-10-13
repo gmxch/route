@@ -19,7 +19,7 @@ if [ -f ".needs-browser" ]; then
     export HOME=/tmp/chromium-home
     export XDG_CONFIG_HOME=/tmp/chromium-home/.config
     export XDG_CACHE_HOME=/tmp/chromium-home/.cache
-    export CHROME_BIN=/usr/bin/google-chrome-stable
+    export CHROME_BIN=/usr/bin/chromium
     export HEADLESS=false
     Xvfb :99 -screen 0 1024x768x24 +extension GLX +render >/dev/null 2>&1 &
     export DISPLAY=:99
