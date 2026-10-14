@@ -99,22 +99,33 @@ jobs:
           BRIDGE_URL: ${{ secrets.BRIDGE_URL }}
           BRIDGE_ADMIN_KEY: ${{ secrets.BRIDGE_ADMIN_KEY }}
           NODE_CATEGORY: ${{ inputs.category }}
+          TARGET_URL: ${{ env.URL }}
         run: |
           [ -z "$BRIDGE_URL" ] || [ -z "$BRIDGE_ADMIN_KEY" ] && exit 0
           
           NODE_ID="gha_$(head /dev/urandom | tr -dc 'a-z0-9' | head -c 6)"
           NODE_KEY=$(head /dev/urandom | tr -dc 'a-zA-Z0-9' | head -c 10)
-          CLEAN_URL=$(echo "$URL" | tr -d '\r\n ' | sed 's/\/$//')
+          CLEAN_URL=$(echo "$TARGET_URL" | tr -d '\r\n\t ' | sed 's/\/$//')
+          
+          # Buat JSON 100% valid menggunakan jq (anti-escape error)
+          PAYLOAD=$(jq -n \
+            --arg action "add" \
+            --arg category "$NODE_CATEGORY" \
+            --arg id "$NODE_ID" \
+            --arg url "$CLEAN_URL" \
+            --arg key "$NODE_KEY" \
+            '{action: $action, category: $category, id: $id, url: $url, key: $key}')
           
           RESPONSE=$(curl -s -X POST "$BRIDGE_URL/v4/node" \
             -H "Content-Type: application/json" \
             -H "key: $BRIDGE_ADMIN_KEY" \
-            -d "{\"action\":\"add\",\"category\":\"$NODE_CATEGORY\",\"id\":\"$NODE_ID\",\"url\":\"$CLEAN_URL\",\"key\":\"$NODE_KEY\"}")
+            -d "$PAYLOAD")
             
           if echo "$RESPONSE" | grep -qE '"status"[[:space:]]*:[[:space:]]*"success"'; then
             echo "::notice::Node $NODE_ID registered successfully."
           else
             echo "::error::Registrasi gagal. Respon: $RESPONSE"
+            echo "Payload yang dikirim: $PAYLOAD"
             exit 1
           fi
           
