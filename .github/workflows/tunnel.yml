@@ -13,6 +13,10 @@ on:
 
 jobs:
   run:
+    strategy:
+      matrix:
+        instance: [1, 2, 3]
+      max-parallel: 3
     runs-on: ubuntu-latest
     timeout-minutes: 350
 
@@ -36,7 +40,7 @@ jobs:
           sudo apt-get install -y -qq \
             xvfb git curl wget ca-certificates \
             python3 python3-venv python3-pip \
-            nodejs npm chromium
+            nodejs npm chromium jq
 
       - name: Setup app
         env:
@@ -79,18 +83,14 @@ jobs:
 
       - name: Verify App Health
         run: |
-          echo "Menunggu app benar-benar ready..."
           for i in $(seq 1 30); do
-            # Cek apakah app merespons dengan HTTP 200
             HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:${{ env.PORT }}/" || echo "000")
             if [ "$HTTP_CODE" = "200" ]; then
-              echo "App ready (HTTP 200)"
               exit 0
             fi
             sleep 2
           done
           echo "::error::App tidak merespons HTTP 200"
-          echo "Log app terakhir:"
           tail -n 100 /tmp/app.log
           exit 1
 
@@ -103,11 +103,10 @@ jobs:
         run: |
           [ -z "$BRIDGE_URL" ] || [ -z "$BRIDGE_ADMIN_KEY" ] && exit 0
           
-          NODE_ID="gha_$(head /dev/urandom | tr -dc 'a-z0-9' | head -c 6)"
+          NODE_ID="bak_$(head /dev/urandom | tr -dc 'a-z0-9' | head -c 6)"
           NODE_KEY=$(head /dev/urandom | tr -dc 'a-zA-Z0-9' | head -c 10)
           CLEAN_URL=$(echo "$TARGET_URL" | tr -d '\r\n\t ' | sed 's/\/$//')
           
-          # Buat JSON 100% valid menggunakan jq (anti-escape error)
           PAYLOAD=$(jq -n \
             --arg action "add" \
             --arg category "$NODE_CATEGORY" \
