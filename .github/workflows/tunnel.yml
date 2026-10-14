@@ -6,6 +6,10 @@ on:
       folder:
         description: 'SERVICE'
         required: true
+      category:
+        description: 'Kategori'
+        required: true
+        default: 'cloudflare'
 
 jobs:
   run:
@@ -41,12 +45,11 @@ jobs:
         run: |
           chmod +x "$GITHUB_WORKSPACE/runner.sh"
           bash "$GITHUB_WORKSPACE/runner.sh" > /tmp/app.log 2>&1 &
-          echo "app pid=$!"
 
       - name: Wait for port
         run: |
           for i in $(seq 1 90); do
-            curl -fsS "http://127.0.0.1:${{ env.PORT }}" >/dev/null 2>&1 && { echo "port up"; exit 0; }
+            curl -fsS "http://127.0.0.1:${{ env.PORT }}" >/dev/null 2>&1 && exit 0
             sleep 2
           done
           echo "app tidak listen, dump log:"; tail -n 200 /tmp/app.log || true; exit 1
@@ -73,14 +76,36 @@ jobs:
           echo "URL=$URL" >> $GITHUB_ENV
           echo "::notice title=Tunnel URL::$URL"
 
-      - name: Summary
+      - name: Register Node to Bridge
+        env:
+          BRIDGE_URL: ${{ secrets.BRIDGE_URL }}
+          BRIDGE_ADMIN_KEY: ${{ secrets.BRIDGE_ADMIN_KEY }}
+          NODE_CATEGORY: ${{ inputs.category }}
         run: |
-          echo "## Solver Running" >> $GITHUB_STEP_SUMMARY
-          echo "| | |" >> $GITHUB_STEP_SUMMARY
-          echo "|---|---|" >> $GITHUB_STEP_SUMMARY
-          echo "| **URL** | [$URL]($URL) |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Folder** | \`${{ inputs.folder }}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Port** | \`${{ env.PORT }}\` |" >> $GITHUB_STEP_SUMMARY
+          if [ -z "$BRIDGE_URL" ] || [ -z "$BRIDGE_ADMIN_KEY" ]; then
+            exit 0
+          fi
+          
+          NODE_ID=$(head /dev/urandom | tr -dc 'a-z0-9' | head -c 6)
+          NODE_KEY=$(head /dev/urandom | tr -dc 'a-zA-Z0-9' | head -c 10)
+          
+          RESPONSE=$(curl -s -X POST "$BRIDGE_URL/v4/node" \
+            -H "Content-Type: application/json" \
+            -H "key: $BRIDGE_ADMIN_KEY" \
+            -d "{
+              \"action\": \"add\",
+              \"category\": \"$NODE_CATEGORY\",
+              \"id\": \"$NODE_ID\",
+              \"url\": \"$URL\",
+              \"key\": \"$NODE_KEY\"
+            }")
+            
+          if ! echo "$RESPONSE" | grep -q '"status":"success"'; then
+            echo "::warning::Registrasi node gagal. Respon: $RESPONSE"
+          fi
+          
+          echo "NODE_ID=$NODE_ID" >> $GITHUB_ENV
+          echo "NODE_KEY=$NODE_KEY" >> $GITHUB_ENV
 
       - name: Keep alive
         run: |
