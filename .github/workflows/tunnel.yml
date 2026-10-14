@@ -52,11 +52,11 @@ jobs:
             curl -fsS "http://127.0.0.1:${{ env.PORT }}" >/dev/null 2>&1 && exit 0
             sleep 2
           done
-          echo "app tidak listen, dump log:"; tail -n 200 /tmp/app.log || true; exit 1
+          echo "::error::App tidak listen"; tail -n 50 /tmp/app.log; exit 1
 
       - name: Install cloudflared
         run: |
-          curl -L --output cloudflared.deb https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
+          curl -sL --output cloudflared.deb https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
           sudo dpkg -i cloudflared.deb
 
       - name: Start Cloudflare Tunnel
@@ -66,15 +66,17 @@ jobs:
       - name: Wait for tunnel URL
         run: |
           for i in $(seq 1 30); do
-            URL=$(grep -oE 'https://[a-zA-Z0-9-]+\.trycloudflare\.com' /tmp/tunnel.log | head -1 || true)
+            # Sanitasi ketat: hapus \r, \n, dan spasi
+            URL=$(grep -oE 'https://[a-zA-Z0-9-]+\.trycloudflare\.com' /tmp/tunnel.log | head -1 | tr -d '\r\n ' || true)
             [ -n "$URL" ] && break
             sleep 2
           done
           if [ -z "$URL" ]; then
-            echo "gagal dapat URL, dump log:"; cat /tmp/tunnel.log; exit 1
+            echo "::error::Gagal mendapatkan URL tunnel"
+            cat /tmp/tunnel.log
+            exit 1
           fi
           echo "URL=$URL" >> $GITHUB_ENV
-          echo "::notice title=Tunnel URL::$URL"
 
       - name: Register Node to Bridge
         env:
@@ -82,26 +84,24 @@ jobs:
           BRIDGE_ADMIN_KEY: ${{ secrets.BRIDGE_ADMIN_KEY }}
           NODE_CATEGORY: ${{ inputs.category }}
         run: |
-          if [ -z "$BRIDGE_URL" ] || [ -z "$BRIDGE_ADMIN_KEY" ]; then
-            exit 0
-          fi
+          [ -z "$BRIDGE_URL" ] || [ -z "$BRIDGE_ADMIN_KEY" ] && exit 0
           
-          NODE_ID=$(head /dev/urandom | tr -dc 'a-z0-9' | head -c 6)
+          NODE_ID="gha_$(head /dev/urandom | tr -dc 'a-z0-9' | head -c 6)"
           NODE_KEY=$(head /dev/urandom | tr -dc 'a-zA-Z0-9' | head -c 10)
+          
+          # Pastikan URL bersih dari trailing slash atau karakter tersembunyi
+          CLEAN_URL=$(echo "$URL" | tr -d '\r\n ' | sed 's/\/$//')
           
           RESPONSE=$(curl -s -X POST "$BRIDGE_URL/v4/node" \
             -H "Content-Type: application/json" \
             -H "key: $BRIDGE_ADMIN_KEY" \
-            -d "{
-              \"action\": \"add\",
-              \"category\": \"$NODE_CATEGORY\",
-              \"id\": \"$NODE_ID\",
-              \"url\": \"$URL\",
-              \"key\": \"$NODE_KEY\"
-            }")
+            -d "{\"action\":\"add\",\"category\":\"$NODE_CATEGORY\",\"id\":\"$NODE_ID\",\"url\":\"$CLEAN_URL\",\"key\":\"$NODE_KEY\"}")
             
-          if ! echo "$RESPONSE" | grep -q '"status":"success"'; then
-            echo "::warning::Registrasi node gagal. Respon: $RESPONSE"
+          if echo "$RESPONSE" | grep -qE '"status"[[:space:]]*:[[:space:]]*"success"'; then
+            echo "::notice::Node $NODE_ID registered successfully."
+          else
+            echo "::error::Registrasi gagal. Respon: $RESPONSE"
+            exit 1
           fi
           
           echo "NODE_ID=$NODE_ID" >> $GITHUB_ENV
@@ -112,7 +112,7 @@ jobs:
           while true; do
             sleep 60
             if ! pgrep -f "cloudflared tunnel" >/dev/null; then
-              echo "cloudflared tunnel mati:"; tail -n 30 /tmp/tunnel.log
+              echo "::error::Cloudflared tunnel mati"
               exit 1
             fi
           done
