@@ -6,6 +6,7 @@ on:
       folder:
         description: 'SERVICE'
         required: true
+        default: 'cf'
       category:
         description: 'Kategori'
         required: true
@@ -120,9 +121,9 @@ jobs:
             -d "$PAYLOAD")
             
           if echo "$RESPONSE" | grep -qE '"status"[[:space:]]*:[[:space:]]*"success"'; then
-            echo "::notice::Node registered."
+            echo "::notice::Node registered successfully."
           else
-            echo "::error::Registrasi gagal."
+            echo "::error::Registrasi gagal. API Response: $RESPONSE"
             exit 1
           fi
           
