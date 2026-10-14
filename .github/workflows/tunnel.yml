@@ -66,7 +66,6 @@ jobs:
       - name: Wait for tunnel URL
         run: |
           for i in $(seq 1 30); do
-            # Sanitasi ketat: hapus \r, \n, dan spasi
             URL=$(grep -oE 'https://[a-zA-Z0-9-]+\.trycloudflare\.com' /tmp/tunnel.log | head -1 | tr -d '\r\n ' || true)
             [ -n "$URL" ] && break
             sleep 2
@@ -78,6 +77,23 @@ jobs:
           fi
           echo "URL=$URL" >> $GITHUB_ENV
 
+      - name: Verify App Health
+        run: |
+          echo "Menunggu app benar-benar ready..."
+          for i in $(seq 1 30); do
+            # Cek apakah app merespons dengan HTTP 200
+            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:${{ env.PORT }}/" || echo "000")
+            if [ "$HTTP_CODE" = "200" ]; then
+              echo "App ready (HTTP 200)"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::App tidak merespons HTTP 200"
+          echo "Log app terakhir:"
+          tail -n 100 /tmp/app.log
+          exit 1
+
       - name: Register Node to Bridge
         env:
           BRIDGE_URL: ${{ secrets.BRIDGE_URL }}
@@ -88,8 +104,6 @@ jobs:
           
           NODE_ID="gha_$(head /dev/urandom | tr -dc 'a-z0-9' | head -c 6)"
           NODE_KEY=$(head /dev/urandom | tr -dc 'a-zA-Z0-9' | head -c 10)
-          
-          # Pastikan URL bersih dari trailing slash atau karakter tersembunyi
           CLEAN_URL=$(echo "$URL" | tr -d '\r\n ' | sed 's/\/$//')
           
           RESPONSE=$(curl -s -X POST "$BRIDGE_URL/v4/node" \
