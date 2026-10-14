@@ -1,6 +1,8 @@
 name: tunnel
 
 on:
+  schedule:
+    - cron: '0 */6 * * *'
   workflow_dispatch:
     inputs:
       folder:
@@ -17,8 +19,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        instance: [1, 2, 3]
-      max-parallel: 3
+        instance: [1, 2, 3, 4, 5]
+      max-parallel: 5
     runs-on: ubuntu-latest
     timeout-minutes: 350
 
@@ -47,7 +49,7 @@ jobs:
       - name: Setup app
         env:
           PORT: ${{ env.PORT }}
-        working-directory: target/${{ inputs.folder }}
+        working-directory: target/${{ github.event.inputs.folder || 'cf' }}
         run: |
           chmod +x "$GITHUB_WORKSPACE/runner.sh"
           bash "$GITHUB_WORKSPACE/runner.sh" > /tmp/app.log 2>&1 &
@@ -98,7 +100,7 @@ jobs:
         env:
           BRIDGE_URL: ${{ secrets.BRIDGE_URL }}
           BRIDGE_ADMIN_KEY: ${{ secrets.BRIDGE_ADMIN_KEY }}
-          NODE_CATEGORY: ${{ inputs.category }}
+          NODE_CATEGORY: ${{ github.event.inputs.category || 'cloudflare' }}
           TARGET_URL: ${{ env.URL }}
         run: |
           [ -z "$BRIDGE_URL" ] || [ -z "$BRIDGE_ADMIN_KEY" ] && exit 0
