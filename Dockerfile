@@ -1,7 +1,7 @@
 FROM python:3.11-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl ca-certificates gnupg wget \
+    curl ca-certificates gnupg wget unzip \
     git python3 python3-pip python3-venv build-essential \
     procps tesseract-ocr libtesseract-dev \
     fonts-liberation fonts-ipafont-gothic libappindicator3-1 \
