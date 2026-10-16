@@ -32,7 +32,6 @@ sync_project() {
     if [ -f ".needs-browser" ]; then
         echo ">>> Browser environment detected. Configuring headless Chrome..."
         mkdir -p /tmp/chromium-home/.config /tmp/chromium-home/.cache
-        
         export CHROME_BIN=/app/chrome/chrome
         export HEADLESS=true
     fi
@@ -50,7 +49,7 @@ sync_project() {
     else
         echo "Error: No recognizable project type found."
         exit 1
- a fi
+    fi
 }
 
 sync_project
