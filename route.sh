@@ -5,7 +5,6 @@ pkill -9 -f "node" 2>/dev/null || true
 pkill -9 -f "python" 2>/dev/null || true
 pkill -9 -f "chromium" 2>/dev/null || true
 pkill -9 -f "chrome" 2>/dev/null || true
-rm -f /tmp/.X99-lock
 
 trap 'echo "Shutting down..."; pkill -P $$ 2>/dev/null || true; exit 0' SIGTERM SIGINT
 
@@ -31,17 +30,11 @@ sync_project() {
     fi
 
     if [ -f ".needs-browser" ]; then
-        if ! pgrep -x Xvfb > /dev/null; then
-            echo "Starting Xvfb..."
-            mkdir -p /tmp/chromium-home/.config /tmp/chromium-home/.cache
-            export HOME=/tmp/chromium-home
-            export XDG_CONFIG_HOME=/tmp/chromium-home/.config
-            export XDG_CACHE_HOME=/tmp/chromium-home/.cache
-            export CHROME_BIN=/usr/bin/google-chrome-stable
-            export DISPLAY=:99
-            Xvfb :99 -screen 0 1024x768x24 +extension GLX +render >/dev/null 2>&1 &
-            sleep 1
-        fi
+        echo ">>> Browser environment detected. Configuring headless Chrome..."
+        mkdir -p /tmp/chromium-home/.config /tmp/chromium-home/.cache
+        
+        export CHROME_BIN=/app/chrome/chrome
+        export HEADLESS=true
     fi
 
     if [ -f "package.json" ]; then
@@ -57,7 +50,7 @@ sync_project() {
     else
         echo "Error: No recognizable project type found."
         exit 1
-    fi
+ a fi
 }
 
 sync_project
